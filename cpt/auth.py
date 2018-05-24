@@ -1,4 +1,6 @@
 import os
+from conans.errors import NoRemoteAvailable
+from conans.client.store.localdb import LocalDB
 from six import string_types
 
 
@@ -89,14 +91,29 @@ class AuthManager(object):
             raise Exception("User and password for remote '%s' not specified" % remote)
         return self._data[remote]
 
+    def user_auth_token_cached(self, upload_remote_name, user):
+        try:
+            remote = self._conan_api._registry.remote(upload_remote_name)
+        except NoRemoteAvailable:
+            return False
+
+        localdb = LocalDB(self._conan_api._client_cache.localdb)
+        username, token = localdb.get_login(remote.url)
+
+        return username == user and token is not None
+
     def credentials_ready(self, upload_remote_name):
         user, password = self.get_user_password(upload_remote_name)
-        return user and password
+        return (user and password) or self.user_auth_token_cached(upload_remote_name, user)
 
     def login(self, remote_name):
         self.printer.print_message("Verifying credentials...")
         user, password = self.get_user_password(remote_name)
-        self._conan_api.authenticate(user, password, remote_name)
+        if user and password:
+            self._conan_api.authenticate(user, password, remote_name)
+        elif not self.user_auth_token_cached(remote_name, user):
+            self.printer.print_message("Token for '%s' user on '%s' not cached" % (user, remote_name))
+            return
         self.printer.print_message("OK! '%s' user logged in '%s' " % (user, remote_name))
 
     def env_vars(self):
